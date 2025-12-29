@@ -1,4 +1,4 @@
-from app.models.master import Company, TenantDB
+from app.models.master.master import Company, TenantDB
 from app.db.tenant_provisioning import create_tenant_db
 
 def provision_company(db, data):

@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine
 from app.db.base import Base
-from app.models import master 
+from app.models.master import master 
 from app.core.config import settings
 
 def init_master_db():

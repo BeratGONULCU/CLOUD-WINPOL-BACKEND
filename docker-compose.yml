@@ -1,0 +1,38 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:14
+    container_name: winpol_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: winpol_master
+      POSTGRES_USER: winpol_admin
+      POSTGRES_PASSWORD: Winpol1251*
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U winpol_admin -d winpol_master" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  backend:
+    build: .
+    container_name: winpol_backend
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    command: >
+      sh -c " echo 'Running migrations...' && python -m alembic upgrade head && echo 'Starting API...' && uvicorn app.main:app --host 0.0.0.0 --port 8000 "
+    ports:
+      - "8000:8000"
+
+volumes:
+  postgres_data:

@@ -1,7 +1,8 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from app.db.init_master import init_master_db
-from app.routers import auth, companies
+from app.routers import auth, companies,tenantdb
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -14,5 +15,27 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# app.include_router(auth.router, prefix="/auth", tags=["Auth"])
-# app.include_router(companies.router, prefix="/companies", tags=["Companies"])
+# BU BLOK OLMAZSA FLUTTER WEB ÇALIŞMAZ
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:60380",
+        "http://192.168.1.36:60380",
+        "http://localhost:8000",
+        "http://192.168.1.36:8000",
+    ],    
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+"""
+"http://localhost:60380",
+        "http://192.168.1.36:60380",
+        "http://localhost:8000",
+        "http://192.168.1.36:8000",  
+"""
+
+app.include_router(auth.router)
+app.include_router(companies.router)
+app.include_router(tenantdb.router)
