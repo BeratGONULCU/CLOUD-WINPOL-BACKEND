@@ -2,14 +2,22 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    # =========================
+    # DATABASE
+    # =========================
     POSTGRES_HOST: str
     POSTGRES_PORT: int
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
     MASTER_DB_NAME: str
 
+    # =========================
+    # APP
+    # =========================
     BASE_URL: str
     ENV: str = "local"
+    SECRET_KEY: str
+    ALGORITHM: str = "HS256"
 
     class Config:
         env_file = ".env"

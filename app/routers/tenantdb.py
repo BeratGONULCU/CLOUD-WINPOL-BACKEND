@@ -1,3 +1,4 @@
+from datetime import timedelta
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -5,7 +6,10 @@ from sqlalchemy import select, text
 from typing import Optional, Generator
 from passlib.context import CryptContext
 
+from app.core.session import SessionContext
+from app.db.router import get_tenant_db_from_session
 from app.db.session import SessionLocal
+from app.dependencies.auth import require_master
 from app.models.tenant.tenant import Firm, User
 from app.services.tenant_service import connect_tenant_by_vergiNo
 from app.core.security import create_access_token
@@ -80,7 +84,7 @@ def get_tenant_db(
 
 @router.get("/tenant-info")
 def tenant_info(
-    tenant_db: Session = Depends(get_tenant_db)
+    tenant_db: Session = Depends(get_tenant_db_from_session)
 ):
     db_name = tenant_db.execute(
         text("SELECT current_database();")
@@ -101,8 +105,9 @@ def tenant_firm_create(
     firma_unvan: str,
     firma_TCkimlik: Optional[str] = None,
     firma_FVergiNo: Optional[str] = None,
-    tenant_db: Session = Depends(get_tenant_db),
-    master_db: Session = Depends(get_db),   # <-- master session
+    session: SessionContext = Depends(require_master),
+    tenant_db: Session = Depends(get_tenant_db_from_session),
+    master_db: Session = Depends(get_db),
 ):
     #  Identity kontrol
     if bool(firma_TCkimlik) == bool(firma_FVergiNo):
@@ -169,45 +174,6 @@ def tenant_firm_create(
         "firma_unvan": firma_unvan
     }
 
-
-
-# =====================================================
-# TENANT LOGIN (BASİT – DEMO)
-# =====================================================
-
-@router.post("/tenant-login")
-def tenant_login(
-    username: str,
-    password: str,
-    tenant_db: Session = Depends(get_tenant_db)
-):
-    result = tenant_db.execute(
-        text("""
-            SELECT kullanici_Guid, kullanici_name
-            FROM users
-            WHERE kullanici_name = :username
-              AND kullanici_pw = :password
-              AND kullanici_pasif = false
-        """),
-        {
-            "username": username,
-            "password": password
-        }
-    ).fetchone()
-
-    if not result:
-        raise HTTPException(401, "Invalid credentials")
-
-    user_id, user_name = result
-
-    token = create_access_token({"sub": str(user_id)})
-
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "user_id": str(user_id),
-        "username": user_name
-    }
 
 # =====================================================
 # TENANT USER REGISTER FİRMA VERGİ NO İLE
@@ -290,7 +256,65 @@ def user_login_to_firmby_vergino(
         if not verify_password(password, user.kullanici_pw):
             raise HTTPException(status_code=401, detail="Invalid credentials")
 
-        token = create_access_token({"sub": str(user.kullanici_Guid)})
+        #token = create_access_token({"sub": str(user.kullanici_Guid)})
+        token = create_access_token(
+        {
+            "sub": str(user.kullanici_Guid),
+            "domain": "tenant",
+            "tenant_id": vergi_no,
+            "role_id": user.role_id
+        },
+        expires_delta=timedelta(days=3)
+        )
+
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "user_id": str(user.kullanici_Guid),
+            "username": user.kullanici_name
+        }
+
+    finally:
+        tenant_db.close()
+
+# =====================================================
+# new endpoint 
+# =====================================================
+
+
+@router.post("/user-login-to-firmby-vergino2")
+def user_login_to_firmby_vergino2(
+    vergi_no: str,
+    email: str,
+    password: str
+):
+    tenant_db: Session = connect_tenant_by_vergiNo(vergi_no)
+
+    try:
+        user = tenant_db.execute(
+            select(User).where(
+                User.kullanici_EMail == email,
+                User.kullanici_pasif == False
+            )
+        ).scalar_one_or_none()
+
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+
+        if not verify_password(password, user.kullanici_pw):
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+
+        #token = create_access_token({"sub": str(user.kullanici_Guid)})
+        token = create_access_token(
+        {
+        "sub": str(user.kullanici_Guid),
+        "domain": "tenant",
+        "tenant_id": vergi_no,
+        "role_id": str(user.role_id) if user.role_id else None
+        },
+        expires_delta=timedelta(days=3)
+        )
+
 
         return {
             "access_token": token,

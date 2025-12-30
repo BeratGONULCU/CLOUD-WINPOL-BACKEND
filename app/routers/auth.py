@@ -6,6 +6,8 @@ from app.core.security import hash_password, verify_password, create_access_toke
 from app.core.logger import logger
 from app.core.auth_context import get_current_token
 from app.core.security import decode_access_token
+from datetime import timedelta
+
 
 router = APIRouter(prefix="/admin", tags=["Admin Auth"])
 
@@ -77,7 +79,15 @@ def admin_login(email: str, password: str, db: Session = Depends(get_db)):
     if not admin or not verify_password(password, admin.password_hash):
         raise HTTPException(401, "Invalid credentials")
 
-    token = create_access_token({"sub": str(admin.id)})
+    #token = create_access_token({"sub": str(admin.id)})
+    token = create_access_token(
+    {
+        "sub": str(admin.id),
+        "domain": "master",
+        "tenant_id": None
+    },
+    expires_delta=timedelta(days=3)
+)
     return {"access_token": token}
 
 

@@ -1,8 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+
 from app.db.session import SessionLocal
-from app.services.company_service import create_company
+from app.dependencies.auth import require_master
+from app.core.session import SessionContext
+from app.db.master import get_master_db
 from app.models.master.master import Company
+from app.services.company_service import create_company
 
 router = APIRouter(prefix="/companies", tags=["Companies"])
 
@@ -19,9 +23,10 @@ def create_company_endpoint(
     vergi_no: str,
     name: str,
     company_code: str,
-    db: Session = Depends(get_db)
+    session: SessionContext = Depends(require_master),  # MASTER KORUMASI
+    db: Session = Depends(get_db)                        # MASTER DB
 ):
-    # Basit validasyonlar
+    
     if len(vergi_no) not in (10, 11):
         raise HTTPException(
             status_code=400,

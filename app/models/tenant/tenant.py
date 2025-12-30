@@ -188,11 +188,12 @@ class User(TenantBase):
     kullanici_lastup_user = Column(Integer)
     kullanici_lastup_date = Column(DateTime)
 
-    kullanici_no = Column(Integer)
-    kullanici_name = Column(String(20))
-    kullanici_pw = Column(String(127))
+    # bu kısımdadki kullanıcı bilgileri güncellendi
+    kullanici_no = Column(Integer,autoincrement=True, unique=True)
+    kullanici_name = Column(String(20),unique=True, nullable=False)
+    kullanici_pw = Column(String(127), nullable=False)
     kullanici_LongName = Column(String(50))
-    kullanici_EMail = Column(String(50))
+    kullanici_EMail = Column(String(50), unique=True,  nullable=False)
     kullanici_SifreTipi = Column(Integer)
     kullanici_SifreDegisim_date = Column(DateTime)
     kullanici_pasif = Column(Boolean, default=False)
