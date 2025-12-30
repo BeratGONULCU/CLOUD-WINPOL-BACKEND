@@ -6,13 +6,14 @@ from sqlalchemy import select, text
 from typing import Optional, Generator
 from passlib.context import CryptContext
 
+from app.core.auth_context import get_current_token
 from app.core.session import SessionContext
 from app.db.router import get_tenant_db_from_session
 from app.db.session import SessionLocal
 from app.dependencies.auth import require_master
-from app.models.tenant.tenant import Firm, User
+from app.models.tenant.tenant import Firm, Role, User
 from app.services.tenant_service import connect_tenant_by_vergiNo
-from app.core.security import create_access_token
+from app.core.security import create_access_token, decode_access_token
 
 router = APIRouter(prefix="/tenant", tags=["Tenant DB"])
 
@@ -83,16 +84,29 @@ def get_tenant_db(
 # =====================================================
 
 @router.get("/tenant-info")
-def tenant_info(
-    tenant_db: Session = Depends(get_tenant_db_from_session)
-):
-    db_name = tenant_db.execute(
-        text("SELECT current_database();")
-    ).scalar()
+def tenant_info(token: str = Depends(get_current_token)):
+    payload = decode_access_token(token)
 
-    return {
-        "connected_database": db_name
-    }
+    tenant_id = payload.get("tenant_id")
+    domain = payload.get("domain")
+
+    if domain != "tenant" or not tenant_id:
+        raise HTTPException(status_code=401, detail="Invalid tenant token")
+
+    tenant_db = connect_tenant_by_vergiNo(tenant_id)
+
+    try:
+        db_name = tenant_db.execute(
+            text("SELECT current_database();")
+        ).scalar()
+
+        return {
+            "connected_database": db_name,
+            "tenant_id": tenant_id,
+        }
+    finally:
+        tenant_db.close()
+
 
 
 # =====================================================
@@ -178,12 +192,20 @@ def tenant_firm_create(
 # =====================================================
 # TENANT USER REGISTER FİRMA VERGİ NO İLE
 # =====================================================
+# - kullanici_create_user eklenecek - Session ile 
+# - role-id seçtirilecek (foreign key nasıl yapılacak)
 
 @router.post("/user-register-to-firmby-vergino")
 def user_register_to_firmby_vergino(
     vergi_no: str,
     username: str,
     password: str,
+    role_id: str,  # checkbox ile seçtiricez.
+    # user_no: Optional[int], # autoincrement (son kullanıcı no +1)
+    longName: Optional[str] = None, # isteğe bağlı
+    cepTel: Optional[str] = None,  # isteğe bağlı ama bunu number olarak alıp sonra str olarak kaydet
+    email: Optional[str] = None,  # isteğe bağlı
+    create_user: Optional[str] = None, 
 ):
     tenant_db: Session = connect_tenant_by_vergiNo(vergi_no)
 
@@ -198,6 +220,16 @@ def user_register_to_firmby_vergino(
                 status_code=404,
                 detail="Bu vergi numarasına ait firma bulunamadı."
             )
+        
+        user_no = tenant_db.execute(
+            text("SELECT COALESCE(MAX(kullanici_no), 0) + 1 FROM users")
+        ).scalar()  
+
+        if not user_no: 
+            raise HTTPException(
+                status_code=404,
+                detail="Kullanıcı numarası bulunamadı."
+            )
 
         # Kullanıcı oluştur
         new_user = User(
@@ -205,8 +237,13 @@ def user_register_to_firmby_vergino(
             firma_siraNo=firm.firma_sirano,
             kullanici_name=username,
             kullanici_pw=hash_password(password),  # aşağıda hash önerisi var
-            kullanici_pasif=False
-        )
+            kullanici_pasif=False,
+            kullanici_LongName=longName,
+            kullanici_EMail=email,
+            kullanici_Ceptel=cepTel,
+            kullanici_no=user_no,
+            kullanici_create_user=create_user,
+          )
 
         tenant_db.add(new_user)
         tenant_db.commit()
@@ -226,6 +263,144 @@ def user_register_to_firmby_vergino(
         raise HTTPException(
             status_code=500,
             detail=f"Kullanıcı oluşturulurken hata oluştu: {str(e)}"
+        )
+    finally:
+        tenant_db.close()
+
+# =====================================================
+# TENANT USER UPDATE FİRMA VERGİ NO İLE
+# =====================================================
+"""
+Güncelle içerisinde;
+
+- kullanici_lastup_user
+- kullanici_lastup_date
+- Kullanici_SifreDegisim_date
+"""
+
+
+@router.put("/user-update-by-vergino")
+def user_update_to_firmby_vergino(
+    vergi_no: str,
+    username: str,
+    password: str,
+    role_id: str,  # checkbox ile seçtiricez.
+    # user_no: Optional[int], # autoincrement (son kullanıcı no +1)
+    longName: Optional[str] = None, # isteğe bağlı
+    cepTel: Optional[str] = None,  # isteğe bağlı ama bunu number olarak alıp sonra str olarak kaydet
+    email: Optional[str] = None,  # isteğe bağlı
+    create_user: Optional[str] = None, 
+):
+    tenant_db: Session = connect_tenant_by_vergiNo(vergi_no)
+
+    try:
+        # Firmayı bul
+        firm = tenant_db.execute(
+            select(Firm).where(Firm.firma_FVergiNo == vergi_no)
+        ).scalar_one_or_none()
+
+        if not firm:
+            raise HTTPException(
+                status_code=404,
+                detail="Bu vergi numarasına ait firma bulunamadı."
+            )
+        
+        user_no = tenant_db.execute(
+            text("SELECT COALESCE(MAX(kullanici_no), 0) + 1 FROM users")
+        ).scalar()  
+
+        if not user_no: 
+            raise HTTPException(
+                status_code=404,
+                detail="Kullanıcı numarası bulunamadı."
+            )
+
+        # Kullanıcı oluştur
+        new_user = User(
+            kullanici_Guid=uuid.uuid4(),
+            firma_siraNo=firm.firma_sirano,
+            kullanici_name=username,
+            kullanici_pw=hash_password(password),  # aşağıda hash önerisi var
+            kullanici_pasif=False,
+            kullanici_LongName=longName,
+            kullanici_EMail=email,
+            kullanici_Ceptel=cepTel,
+            kullanici_no=user_no,
+            kullanici_create_user=create_user,
+          )
+
+        tenant_db.add(new_user)
+        tenant_db.commit()
+        tenant_db.refresh(new_user)
+
+        return {
+            "user_id": str(new_user.kullanici_Guid),
+            "username": new_user.kullanici_name,
+            "firma_siraNo": firm.firma_sirano
+        }
+
+    except HTTPException:
+        tenant_db.rollback()
+        raise
+    except Exception as e:
+        tenant_db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Kullanıcı oluşturulurken hata oluştu: {str(e)}"
+        )
+    finally:
+        tenant_db.close()
+
+
+# =====================================================
+# ROLE INSERT FİRMA VERGİ NO İLE
+# =====================================================
+
+@router.post("/role-insert-vergino")
+def role_insert_vergino(
+    vergi_no: str,
+    name: str,
+    description: str,
+):
+    tenant_db: Session = connect_tenant_by_vergiNo(vergi_no)
+
+    try:
+        # Firmayı bul
+        firm = tenant_db.execute(
+            select(Firm).where(Firm.firma_FVergiNo == vergi_no)
+        ).scalar_one_or_none()
+
+        if not firm:
+            raise HTTPException(
+                status_code=404,
+                detail="Bu vergi numarasına ait firma bulunamadı."
+            )
+
+        # Rol oluştur
+        new_role = Role(
+            id=uuid.uuid4(),
+            name=name,
+            description=description
+        )
+
+        tenant_db.add(new_role)
+        tenant_db.commit()
+        tenant_db.refresh(new_role)
+
+        return {
+            "role_id": str(new_role.id),
+            "name": new_role.name,
+            "description": new_role.description
+        }
+
+    except HTTPException:
+        tenant_db.rollback()
+        raise
+    except Exception as e:
+        tenant_db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"role eklenirken hata oluştu: {str(e)}"
         )
     finally:
         tenant_db.close()
