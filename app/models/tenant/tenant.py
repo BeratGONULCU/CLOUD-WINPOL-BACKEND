@@ -183,7 +183,7 @@ class User(TenantBase):
     nullable=False
     )
 
-    kullanici_create_user = Column(Integer)
+    kullanici_create_user = Column(UUID(as_uuid=True), nullable=True)
     kullanici_create_date = Column(DateTime, server_default=func.now())
     kullanici_lastup_user = Column(Integer)
     kullanici_lastup_date = Column(DateTime)

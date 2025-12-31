@@ -10,10 +10,14 @@ from app.core.auth_context import get_current_token
 from app.core.session import SessionContext
 from app.db.router import get_tenant_db_from_session
 from app.db.session import SessionLocal
-from app.dependencies.auth import require_master
+from app.dependencies.auth import require_master, require_tenant
 from app.models.tenant.tenant import Firm, Role, User
+from app.services import get_current_user
 from app.services.tenant_service import connect_tenant_by_vergiNo
 from app.core.security import create_access_token, decode_access_token
+from fastapi import Depends, HTTPException, status
+from jose import jwt, JWTError
+from datetime import datetime,timezone
 
 router = APIRouter(prefix="/tenant", tags=["Tenant DB"])
 
@@ -205,7 +209,7 @@ def user_register_to_firmby_vergino(
     longName: Optional[str] = None, # isteğe bağlı
     cepTel: Optional[str] = None,  # isteğe bağlı ama bunu number olarak alıp sonra str olarak kaydet
     email: Optional[str] = None,  # isteğe bağlı
-    create_user: Optional[str] = None, 
+    session: SessionContext = Depends(require_tenant), 
 ):
     tenant_db: Session = connect_tenant_by_vergiNo(vergi_no)
 
@@ -242,7 +246,7 @@ def user_register_to_firmby_vergino(
             kullanici_EMail=email,
             kullanici_Ceptel=cepTel,
             kullanici_no=user_no,
-            kullanici_create_user=create_user,
+            kullanici_create_user=session.user_id,
           )
 
         tenant_db.add(new_user)
@@ -268,14 +272,47 @@ def user_register_to_firmby_vergino(
         tenant_db.close()
 
 # =====================================================
+# GET CURRENT USER TEST
+# =====================================================
+
+
+"""
+@router.get("/get")
+def get_current_user_from_token(token: str = Depends(oauth2_scheme)) -> dict:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+
+        username = payload.get("sub")
+        user_guid = payload.get("user_guid")
+
+        if not username:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token"
+            )
+
+        return {
+            "username": username,
+            "user_guid": user_guid
+        }
+
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token"
+        )
+    """    
+        
+
+# =====================================================
 # TENANT USER UPDATE FİRMA VERGİ NO İLE
 # =====================================================
 """
 Güncelle içerisinde;
 
-- kullanici_lastup_user
-- kullanici_lastup_date
-- Kullanici_SifreDegisim_date
+- kullanici_lastup_user --
+- kullanici_lastup_date --
+- Kullanici_SifreDegisim_date -> buna gerek yok
 """
 
 
@@ -285,11 +322,11 @@ def user_update_to_firmby_vergino(
     username: str,
     password: str,
     role_id: str,  # checkbox ile seçtiricez.
-    # user_no: Optional[int], # autoincrement (son kullanıcı no +1)
+    # user_no: Optional[int], # (son kullanıcı no +1)
     longName: Optional[str] = None, # isteğe bağlı
     cepTel: Optional[str] = None,  # isteğe bağlı ama bunu number olarak alıp sonra str olarak kaydet
     email: Optional[str] = None,  # isteğe bağlı
-    create_user: Optional[str] = None, 
+    session: SessionContext = Depends(require_tenant)
 ):
     tenant_db: Session = connect_tenant_by_vergiNo(vergi_no)
 
@@ -326,7 +363,9 @@ def user_update_to_firmby_vergino(
             kullanici_EMail=email,
             kullanici_Ceptel=cepTel,
             kullanici_no=user_no,
-            kullanici_create_user=create_user,
+            kullanici_lastup_user=session.user_id,
+            kullanici_lastup_date=datetime.now(timezone.utc),
+            kullanici_SifreDegisim_date=datetime.now(timezone.utc)
           )
 
         tenant_db.add(new_user)
@@ -404,6 +443,43 @@ def role_insert_vergino(
         )
     finally:
         tenant_db.close()
+
+# =====================================================
+# ALL ROLES 
+# =====================================================
+
+@router.get("/get-all-roles")
+def get_all_roles(
+    vergi_no: str,
+    session: SessionContext = Depends(require_tenant),
+):
+    tenant_db: Session = connect_tenant_by_vergiNo(vergi_no)
+
+    try:
+        roles = tenant_db.execute(
+            select(Role)
+        ).scalars().all()
+
+        return {
+            "count": len(roles),
+            "roles": [
+                {
+                    "id": str(role.id),
+                    "name": role.name,
+                    "description": role.description,
+                }
+                for role in roles
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Roller alınırken hata oluştu: {str(e)}"
+        ) 
+    finally:
+        tenant_db.close()
+
+
 
 # =====================================================
 # TENANT LOGIN FİRMA VERGİ NO İLE
