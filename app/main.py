@@ -29,13 +29,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-"""
-"http://localhost:60380",
-        "http://192.168.1.36:60380",
-        "http://localhost:8000",
-        "http://192.168.1.36:8000",  
-"""
-
 app.include_router(auth.router)
 app.include_router(companies.router)
 app.include_router(tenantdb.router)

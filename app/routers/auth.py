@@ -1,3 +1,4 @@
+from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Response,Request
 from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
@@ -6,7 +7,7 @@ from app.core.security import hash_password, verify_password, create_access_toke
 from app.core.logger import logger
 from app.core.auth_context import get_current_token
 from app.core.security import decode_access_token
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 
 router = APIRouter(prefix="/admin", tags=["Admin Auth"])
@@ -71,13 +72,15 @@ def admin_login(
 """
 
 
-
-
 @router.post("/login")
-def admin_login(email: str, password: str, db: Session = Depends(get_db)):
+def admin_login(email: str, password: str,db: Session = Depends(get_db)):
     admin = db.query(AdminUser).filter(AdminUser.email == email).first()
     if not admin or not verify_password(password, admin.password_hash):
         raise HTTPException(401, "Invalid credentials")
+    
+    admin.last_login_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(admin)
 
     #token = create_access_token({"sub": str(admin.id)})
     token = create_access_token(

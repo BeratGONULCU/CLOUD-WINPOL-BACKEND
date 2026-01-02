@@ -70,4 +70,10 @@ def get_all_companies(
 ):
     companies = db.query(Company).all()
 
+    if not companies:
+        raise HTTPException(
+            status_code=400,
+            detail="herhangi bir şirket bulunamadı"
+        )
+
     return companies

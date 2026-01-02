@@ -119,7 +119,7 @@ def tenant_info(token: str = Depends(get_current_token)):
 
 @router.post("/tenant-firm-create")
 def tenant_firm_create(
-    firma_create_user: int,
+    #firma_create_user: int,
     firma_unvan: str,
     firma_TCkimlik: Optional[str] = None,
     firma_FVergiNo: Optional[str] = None,
@@ -176,7 +176,7 @@ def tenant_firm_create(
         """),
         {
             "firma_Guid": firma_guid,
-            "firma_create_user": firma_create_user,
+            #"firma_create_user": firma_create_user,
             "firma_unvan": firma_unvan,
             "firma_TCkimlik": firma_TCkimlik,
             "firma_FVergiNo": firma_FVergiNo,
@@ -247,6 +247,8 @@ def user_register_to_firmby_vergino(
             kullanici_Ceptel=cepTel,
             kullanici_no=user_no,
             kullanici_create_user=session.user_id,
+            # bu kayda kullanici_lastup_user ve kullanici_lastup_date (en son kim değiştirdi) kayıtlarını eklemek gerekecek. 
+            # role_id de eklenecek.
           )
 
         tenant_db.add(new_user)
@@ -270,6 +272,13 @@ def user_register_to_firmby_vergino(
         )
     finally:
         tenant_db.close()
+
+
+# =====================================================
+# UPDATE USER 
+# =====================================================
+
+
 
 # =====================================================
 # GET CURRENT USER TEST
