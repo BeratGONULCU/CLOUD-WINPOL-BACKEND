@@ -194,6 +194,38 @@ def tenant_firm_create(
 
 
 # =====================================================
+# TENANT ALL FİRM LİSTESİ - FİRMA VERGİ NO İLE
+# =====================================================
+
+@router.get("/get-all-firmsby-vergiNo")
+def Get_All_Firms_By_Vergino(
+    vergiNo: str, # 11 haneli olacak ve required olacak
+):
+    tenant_db : Session = connect_tenant_by_vergiNo(vergiNo)
+
+    try:
+        firms = tenant_db.execute(
+            select(Firm).where(Firm.firma_FVergiNo == vergiNo)
+        ).scalar_one_or_none()
+
+        if not firms: 
+            raise HTTPException(
+                status_code=404,
+                detail="bu vergi no ile firma kaydı bulunamadı."
+            )
+    
+        if not firms.firma_FVergiNo == vergiNo: # böyle bir şeyin olma ihtimali çok düşük
+            raise HTTPException(
+                status_code=404,
+                detail="yanlış vergi no değeri girildi"
+            )
+        
+        return firms
+
+    finally:
+        tenant_db.close()
+
+# =====================================================
 # TENANT USER REGISTER FİRMA VERGİ NO İLE
 # =====================================================
 # - kullanici_create_user eklenecek - Session ile 

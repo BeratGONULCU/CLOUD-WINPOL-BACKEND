@@ -17,31 +17,47 @@ class Firm(TenantBase):
     __tablename__ = "firms"
 
     firma_Guid = Column(
-    UUID(as_uuid=True),
-    primary_key=True,
-    nullable=False
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        nullable=False
     )
+
     firma_sirano = Column(
         Integer,
         Identity(start=1),
         nullable=False,
         unique=True
     )
-    firma_kilitli = Column(Boolean, default=False)
-    firma_create_user = Column(Integer)
+
+    firma_kilitli = Column(Boolean, nullable=False, default=False)
+
+    firma_create_user = Column(UUID(as_uuid=True), nullable=True)
+    firma_lastup_user = Column(UUID(as_uuid=True), nullable=True)
+
     firma_create_date = Column(DateTime, server_default=func.now())
-    firma_lastup_user = Column(Integer)
-    firma_lastup_date = Column(DateTime)
+    firma_lastup_date = Column(DateTime, onupdate=func.now())
 
     firma_unvan = Column(String(127))
     firma_unvan2 = Column(String(127))
-    firma_TCkimlik = Column(String(11), unique=True) 
-    firma_FVergiDaire = Column(String(50)) 
-    firma_FVergiNo = Column(String(10), unique=True) 
-    firma_web_sayfasi = Column(String(50)) 
 
-    branches = relationship("Branch", back_populates="firm", cascade="all, delete-orphan")
-    users = relationship("User", back_populates="firm", cascade="all, delete-orphan")
+    firma_TCkimlik = Column(String(11), unique=True)
+    firma_FVergiDaire = Column(String(50))
+    firma_FVergiNo = Column(String(10), unique=True)
+    firma_web_sayfasi = Column(String(50))
+
+    branches = relationship(
+        "Branch",
+        back_populates="firm",
+        cascade="all, delete-orphan"
+    )
+
+    users = relationship(
+        "User",
+        back_populates="firm",
+        cascade="all, delete-orphan"
+    )
+
     mikro_api_settings = relationship(
         "MikroApiSettings",
         back_populates="firm",
@@ -52,13 +68,14 @@ class Firm(TenantBase):
     __table_args__ = (
         CheckConstraint(
             """
-                ("firma_TCkimlik" IS NOT NULL AND "firma_FVergiNo" IS NULL)
-                OR
-                ("firma_TCkimlik" IS NULL AND "firma_FVergiNo" IS NOT NULL)
-                """,
-                name="ck_firm_exactly_one_identity"
+            ("firma_TCkimlik" IS NOT NULL AND "firma_FVergiNo" IS NULL)
+            OR
+            ("firma_TCkimlik" IS NULL AND "firma_FVergiNo" IS NOT NULL)
+            """,
+            name="ck_firm_exactly_one_identity"
         ),
     )
+
 
     
     """
