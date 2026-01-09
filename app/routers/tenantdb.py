@@ -12,9 +12,10 @@ from app.core.session import SessionContext
 from app.db.master import get_master_db
 from app.db.router import get_tenant_db_from_session
 from app.db.session import SessionLocal
+from app.db.tenant_engine import get_engine_by_db_name
 from app.dependencies.auth import require_master, require_tenant
-from app.models.tenant.tenant import Branch, Firm, MikroApiSettings, Role, User
-from app.services import get_current_user
+from app.models.tenant.tenant import Branch, Firm, MikroApiSettings, Role, User, UserFavorite
+from app.services.get_current_user import get_current_user
 from app.services.tenant_service import connect_tenant_by_vergiNo
 from app.core.security import create_access_token, decode_access_token
 from fastapi import Depends, HTTPException, status
@@ -22,6 +23,8 @@ from jose import jwt, JWTError
 from datetime import datetime,timezone
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import logging
+from sqlalchemy.orm import sessionmaker
+
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -203,55 +206,60 @@ def tenant_info(token: str = Depends(get_current_token)):
 
 @router.post("/tenant-firm-create")
 def tenant_firm_create(
-    #firma_create_user: int,
     firma_unvan: str,
     firma_TCkimlik: Optional[str] = None,
     firma_FVergiNo: Optional[str] = None,
-    session: SessionContext = Depends(require_master),
-    tenant_db: Session = Depends(get_tenant_db_from_session),
     master_db: Session = Depends(get_db),
 ):
-    #  Identity kontrol
+    # Kimlik kontrol
     if bool(firma_TCkimlik) == bool(firma_FVergiNo):
         raise HTTPException(
             status_code=400,
             detail="Firma için sadece TC Kimlik No veya Vergi No girilmelidir."
         )
 
-    #  Hangi tenant DB’deyiz?
-    tenant_db_name = tenant_db.execute(
-        text("SELECT current_database()")
-    ).scalar()
-
-    #  Master DB’den firma GUID çek
-    firma_guid = master_db.execute(
+    # Master DB → company bul
+    company = master_db.execute(
         text("""
-            SELECT company_id
-            FROM tenant_dbs
-            WHERE db_name = :db_name
+            SELECT id
+            FROM companies
+            WHERE vergi_no = :vergi_no
         """),
-        {"db_name": tenant_db_name}
+        {"vergi_no": firma_FVergiNo}
     ).scalar()
 
-    if not firma_guid:
-        raise HTTPException(
-            status_code=404,
-            detail="Master DB'de bu tenant için firma bulunamadı"
-        )
+    if not company:
+        raise HTTPException(404, "Company bulunamadı")
 
-    #  Tenant DB → firms insert
+    # Tenant DB bilgisini al
+    tenant_db_name = master_db.execute(
+        text("""
+            SELECT db_name
+            FROM tenant_dbs
+            WHERE company_id = :company_id
+        """),
+        {"company_id": company}
+    ).scalar()
+
+    if not tenant_db_name:
+        raise HTTPException(404, "Tenant DB bulunamadı")
+
+    # Tenant DB’ye MANUEL bağlan
+    tenant_engine = get_engine_by_db_name(tenant_db_name)
+    TenantSession = sessionmaker(bind=tenant_engine)
+    tenant_db = TenantSession()
+
+    # Firm insert
     result = tenant_db.execute(
         text("""
             INSERT INTO firms (
                 "firma_Guid",
-                firma_create_user,
                 firma_unvan,
                 "firma_TCkimlik",
                 "firma_FVergiNo"
             )
             VALUES (
                 :firma_Guid,
-                :firma_create_user,
                 :firma_unvan,
                 :firma_TCkimlik,
                 :firma_FVergiNo
@@ -259,8 +267,7 @@ def tenant_firm_create(
             RETURNING "firma_Guid", firma_sirano;
         """),
         {
-            "firma_Guid": firma_guid,
-            #"firma_create_user": firma_create_user,
+            "firma_Guid": company,
             "firma_unvan": firma_unvan,
             "firma_TCkimlik": firma_TCkimlik,
             "firma_FVergiNo": firma_FVergiNo,
@@ -275,6 +282,7 @@ def tenant_firm_create(
         "firma_sirano": row.firma_sirano,
         "firma_unvan": firma_unvan
     }
+
 
 # =====================================================
 # TENANT DELETE SELECTED FİRM - FİRMA VERGİ NO İLE
@@ -623,7 +631,7 @@ def insert_firm(
 
 @router.get("/get-all-firmsby-vergiNo")
 def Get_All_Firms_By_Vergino(
-    vergiNo: str, # 11 haneli olacak ve required olacak
+    vergiNo: str, # 10 haneli olacak ve required olacak
 ):
     tenant_db : Session = connect_tenant_by_vergiNo(vergiNo)
 
@@ -660,12 +668,10 @@ def user_register_to_firmby_vergino(
     vergi_no: str,
     username: str,
     password: str,
-    role_id: str,  # checkbox ile seçtiricez.
-    # user_no: Optional[int], # autoincrement (son kullanıcı no +1)
-    longName: Optional[str] = None, # isteğe bağlı
-    cepTel: Optional[str] = None,  # isteğe bağlı ama bunu number olarak alıp sonra str olarak kaydet
-    email: Optional[str] = None,  # isteğe bağlı
-    session: SessionContext = Depends(require_tenant), 
+    role_id: str,
+    longName: Optional[str] = None,
+    cepTel: Optional[str] = None,
+    email: Optional[str] = None,
 ):
     tenant_db: Session = connect_tenant_by_vergiNo(vergi_no)
 
@@ -680,15 +686,16 @@ def user_register_to_firmby_vergino(
                 status_code=404,
                 detail="Bu vergi numarasına ait firma bulunamadı."
             )
-        
+
+        # Yeni kullanıcı numarası
         user_no = tenant_db.execute(
             text("SELECT COALESCE(MAX(kullanici_no), 0) + 1 FROM users")
-        ).scalar()  
+        ).scalar()
 
-        if not user_no: 
+        if not user_no:
             raise HTTPException(
-                status_code=404,
-                detail="Kullanıcı numarası bulunamadı."
+                status_code=500,
+                detail="Kullanıcı numarası üretilemedi."
             )
 
         # Kullanıcı oluştur
@@ -696,26 +703,24 @@ def user_register_to_firmby_vergino(
             kullanici_Guid=uuid.uuid4(),
             firma_siraNo=firm.firma_sirano,
             kullanici_name=username,
-            kullanici_pw=hash_password(password),  # aşağıda hash önerisi var
+            kullanici_pw=hash_password(password),
             kullanici_pasif=False,
             role_id=role_id,
             kullanici_LongName=longName,
             kullanici_EMail=email,
             kullanici_Ceptel=cepTel,
             kullanici_no=user_no,
-            kullanici_create_user=session.user_id,
-            # bu kayda kullanici_lastup_user ve kullanici_lastup_date (en son kim değiştirdi) kayıtlarını eklemek gerekecek. 
-            # role_id de eklenecek.
-          )
+            kullanici_create_user=None,  # REGISTER → SYSTEM
+        )
 
         tenant_db.add(new_user)
         tenant_db.commit()
         tenant_db.refresh(new_user)
- 
+
         return {
             "user_id": str(new_user.kullanici_Guid),
             "username": new_user.kullanici_name,
-            "firma_siraNo": firm.firma_sirano
+            "firma_siraNo": firm.firma_sirano,
         }
 
     except HTTPException:
@@ -769,7 +774,6 @@ def get_current_user_from_token(token: str = Depends(oauth2_scheme)) -> dict:
         )
     """    
         
-
 # =====================================================
 # TENANT USER UPDATE FİRMA VERGİ NO İLE
 # =====================================================
@@ -1180,7 +1184,7 @@ def get_API_Info(
         # İŞ KURALI HATASI
         if not api_list:
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
+                status_code=status.HTTP_404_NOT_FOUND,
                 detail="Mikro API bilgileri henüz tanımlanmamış."
             )
 
@@ -1193,4 +1197,64 @@ def get_API_Info(
             detail="Veritabanı hatası"
         )
 
- 
+# =====================================================
+# GET ALL user_favorites 
+# =====================================================
+
+@router.get("/get-all-favorites")
+def get_all_favorites( 
+    tenant_db: Session = Depends(get_tenant_db),
+    session: SessionContext = Depends(require_tenant),
+    ):
+   
+   try:
+       favorite_list = tenant_db.execute(
+           select(UserFavorite)
+       ).scalars().all()
+
+       if not favorite_list:
+           raise HTTPException(
+               status_code=status.HTTP_404_NOT_FOUND,
+               detail="favori bilgileri yok."
+           )
+       
+       return favorite_list
+   except SQLAlchemyError:
+       raise HTTPException(
+           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+           detail="veritabanı hatası"
+       )
+   
+# =====================================================
+# GET ALL user_favorites BY ID
+# =====================================================
+
+@router.get("/get-favorite-by-id")
+def get_favorite_by_id(
+    module_key:str,
+    current_user: User = Depends(get_current_user),
+    tenant_db: Session = Depends(get_tenant_db),
+    session: SessionContext = Depends(require_tenant),
+    ):
+    
+    try: 
+        favorite_list_id = tenant_db.execute(
+            select(UserFavorite).where(
+                UserFavorite.user_id == current_user.kullanici_Guid,
+                UserFavorite.module_key == module_key,
+                )
+        ).scalar_one_or_none()
+
+        if not favorite_list_id: 
+            raise HTTPException(
+               status_code=status.HTTP_404_NOT_FOUND,
+               detail="böyle bir veri yok."
+           )
+        
+        return favorite_list_id
+    
+    except SQLAlchemyError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="veritabanı hatası"
+        )

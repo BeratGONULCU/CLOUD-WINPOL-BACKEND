@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
@@ -6,7 +6,11 @@ from app.dependencies.auth import require_master
 from app.core.session import SessionContext
 from app.db.master import get_master_db
 from app.models.master.master import Company
+from app.models.tenant.tenant import User
+from app.services.get_current_user import get_current_user
 from app.services.company_service import create_company
+from sqlalchemy.exc import SQLAlchemyError
+
 
 router = APIRouter(prefix="/companies", tags=["Companies"])
 
@@ -60,8 +64,9 @@ def create_company_endpoint(
         "status": company.status
     }
 
-
-
+# =====================================================
+# GET ALL COMPANIES 
+# =====================================================
 
 
 @router.get("/get-all-companies")
@@ -77,3 +82,32 @@ def get_all_companies(
         )
 
     return companies
+
+
+# =====================================================
+# GET COMPANIES BY ID - FİRMA VERGI NO İLE
+# =====================================================
+
+@router.get("/get-companies-by-id")
+def get_companies_by_id(
+    vergi_no:str,
+    db: Session = Depends(get_db)
+):
+    try:
+        company_by_id = db.query(Company).filter(
+            Company.vergi_no == vergi_no
+        ).first()
+
+        if company_by_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="herhangi bir şirket bulunamadı"
+            )
+
+        return company_by_id
+    
+    except SQLAlchemyError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="veritabanı hatası"
+        )

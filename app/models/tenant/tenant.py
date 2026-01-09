@@ -220,6 +220,12 @@ class User(TenantBase):
 
     firm = relationship("Firm", back_populates="users")
     role = relationship("Role")
+    favorites = relationship(
+    "UserFavorite",
+    back_populates="user",
+    cascade="all, delete-orphan"
+    )
+
 
 
 # =====================================================
@@ -298,4 +304,48 @@ class MikroApiSettings(TenantBase):
         "Firm",
         back_populates="mikro_api_settings",
         foreign_keys=[firma_Guid]
+    )
+
+
+
+# =====================================================
+# USER FAVORITES
+# =====================================================
+
+class UserFavorite(TenantBase):
+    __tablename__ = "user_favorites"
+
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4
+    )
+
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.kullanici_Guid", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    module_key = Column(
+        String(50),
+        nullable=False
+    )
+
+    created_at = Column(
+        DateTime,
+        server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "module_key",
+            name="uq_user_favorites_user_module"
+        ),
+    )
+
+    user = relationship(
+        "User",
+        back_populates="favorites"
     )
