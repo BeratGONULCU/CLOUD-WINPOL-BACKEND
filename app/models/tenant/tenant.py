@@ -41,9 +41,9 @@ class Firm(TenantBase):
     firma_unvan = Column(String(127))
     firma_unvan2 = Column(String(127))
 
-    firma_TCkimlik = Column(String(11), unique=True)
+    firma_TCkimlik = Column(String(11), unique=True, nullable=True)
+    firma_FVergiNo = Column(String(10), unique=True, nullable=False)
     firma_FVergiDaire = Column(String(50))
-    firma_FVergiNo = Column(String(10), unique=True)
     firma_web_sayfasi = Column(String(50))
 
     branches = relationship(
@@ -66,15 +66,25 @@ class Firm(TenantBase):
     )
 
     __table_args__ = (
-        CheckConstraint(
-            """
-            ("firma_TCkimlik" IS NOT NULL AND "firma_FVergiNo" IS NULL)
-            OR
-            ("firma_TCkimlik" IS NULL AND "firma_FVergiNo" IS NOT NULL)
-            """,
-            name="ck_firm_exactly_one_identity"
-        ),
-    )
+    CheckConstraint(
+        """
+        (
+            "firma_TCkimlik" IS NOT NULL
+            AND "firma_FVergiNo" IS NOT NULL
+            AND length("firma_TCkimlik") = 11
+            AND length("firma_FVergiNo") = 11
+        )
+        OR
+        (
+            "firma_TCkimlik" IS NULL
+            AND "firma_FVergiNo" IS NOT NULL
+            AND length("firma_FVergiNo") = 10
+        )
+        """,
+        name="ck_firm_tax_identity"
+    ),
+)
+
 
 
     
@@ -270,42 +280,117 @@ class AuditLog(TenantBase):
 
 # eski mikro_api tablosu (şuanda masterdb içerisinde tutuluyor , firms içerisindeki firma_sirano ile bağlı)
 
+import uuid
+from sqlalchemy import (
+    Column, String, Boolean, Integer,
+    ForeignKey, DateTime
+)
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+from app.db.base_tenant import TenantBase
+
+
 class MikroApiSettings(TenantBase):
     __tablename__ = "mikro_api_settings"
 
-    api_Guid = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # =======================
+    # PRIMARY KEY
+    # =======================
+    api_Guid = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4
+    )
 
+    # =======================
+    # FIRM RELATION
+    # =======================
     firma_Guid = Column(
         UUID(as_uuid=True),
-        ForeignKey("firms.firma_Guid"),
+        ForeignKey("firms.firma_Guid", ondelete="CASCADE"),
         nullable=False
     )
 
     firma_siraNo = Column(
         Integer,
-        ForeignKey("firms.firma_sirano"),
+        ForeignKey("firms.firma_sirano", ondelete="CASCADE"),
         nullable=False
     )
 
-    api_kilitli = Column(Boolean, default=False)
-    api_create_user = Column(Integer)
-    api_create_date = Column(DateTime, server_default=func.now())
-    api_lastup_user = Column(Integer)
-    api_lastup_date = Column(DateTime)
+    # =======================
+    # AUDIT / STATE
+    # =======================
+    api_kilitli = Column(
+        Boolean,
+        nullable=False,
+        server_default="false"
+    )
 
-    api_key = Column(String)
-    api_firmano = Column(String)
-    api_subeno = Column(String)
-    api_veritabani = Column(String)
-    api_kullanici = Column(String)
-    api_pw = Column(String)
+    api_create_user = Column(UUID(as_uuid=True), nullable=True)
+    api_lastup_user = Column(UUID(as_uuid=True), nullable=True)
 
+    api_create_date = Column(
+        DateTime,
+        server_default=func.now()
+    )
+
+    api_lastup_date = Column(
+        DateTime,
+        onupdate=func.now()
+    )
+
+    # =======================
+    # CONNECTION INFO
+    # =======================
+    api_ip = Column(
+        String(64),
+        nullable=False,
+        comment="Mikro ERP API IP / Host"
+    )
+
+    api_port = Column(
+        Integer,
+        nullable=False,
+        comment="Mikro ERP API Port"
+    )
+
+    api_protocol = Column(
+        String(10),
+        nullable=False,
+        server_default="http",
+        comment="http | https"
+    )
+
+    # =======================
+    # MIKRO INFO
+    # =======================
+    api_firmakodu = Column(
+        String(50),
+        nullable=False
+    )
+
+    api_calismayili = Column(
+        String(4),
+        nullable=False
+    )
+
+    api_kullanici = Column(String(100))
+    api_pw = Column(String(255))
+    api_key = Column(String(255))
+
+    api_firmano = Column(String(20))
+    api_subeno = Column(String(20))
+    api_veritabani = Column(String(100))
+
+    # =======================
+    # RELATIONSHIP
+    # =======================
     firm = relationship(
         "Firm",
         back_populates="mikro_api_settings",
         foreign_keys=[firma_Guid]
     )
-
 
 
 # =====================================================
@@ -349,3 +434,4 @@ class UserFavorite(TenantBase):
         "User",
         back_populates="favorites"
     )
+

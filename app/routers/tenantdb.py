@@ -2,7 +2,7 @@ from datetime import timedelta
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
-from sqlalchemy import select, text
+from sqlalchemy import UUID, select, text
 from typing import Optional, Generator
 from passlib.context import CryptContext
 
@@ -668,7 +668,7 @@ def user_register_to_firmby_vergino(
     vergi_no: str,
     username: str,
     password: str,
-    role_id: str,
+    role_id: Optional[str] = None,
     longName: Optional[str] = None,
     cepTel: Optional[str] = None,
     email: Optional[str] = None,
