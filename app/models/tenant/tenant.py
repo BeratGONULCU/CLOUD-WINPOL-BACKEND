@@ -280,15 +280,6 @@ class AuditLog(TenantBase):
 
 # eski mikro_api tablosu (şuanda masterdb içerisinde tutuluyor , firms içerisindeki firma_sirano ile bağlı)
 
-import uuid
-from sqlalchemy import (
-    Column, String, Boolean, Integer,
-    ForeignKey, DateTime
-)
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
-from app.db.base_tenant import TenantBase
 
 
 class MikroApiSettings(TenantBase):

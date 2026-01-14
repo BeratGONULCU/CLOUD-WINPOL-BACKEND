@@ -1,4 +1,5 @@
 from datetime import timedelta
+import hashlib
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
@@ -15,6 +16,7 @@ from app.db.session import SessionLocal
 from app.db.tenant_engine import get_engine_by_db_name
 from app.dependencies.auth import require_master, require_tenant
 from app.models.tenant.tenant import Branch, Firm, MikroApiSettings, Role, User, UserFavorite
+from app.schemas.mikro_api import MikroApiUpdateSchema
 from app.services.get_current_user import get_current_user
 from app.services.tenant_service import connect_tenant_by_vergiNo
 from app.core.security import create_access_token, decode_access_token
@@ -1258,3 +1260,63 @@ def get_favorite_by_id(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="veritabanı hatası"
         )
+    
+
+# =====================================================
+# INSERT mikro_api_settings
+# =====================================================
+
+@router.put("/push-mikro-info")
+def push_mikro_infos(
+    payload: MikroApiUpdateSchema,
+    tenant_db: Session = Depends(get_tenant_db),
+    current_user: UUID = Depends(get_current_user)
+):
+    
+    firm = tenant_db.execute(
+        select(Firm).where(Firm.firma_kilitli != True)
+    ).scalar_one_or_none()
+
+    if not firm:
+        raise HTTPException(
+            status_code=404,
+            detail="firma bilgisi yok."
+        )
+    
+    mikro = tenant_db.execute(
+        select(MikroApiSettings).where(MikroApiSettings.firma_Guid == firm.firma_Guid)
+    ).scalar_one_or_none()
+    
+
+    if not mikro:
+        raise HTTPException(
+            status_code=404,
+            detail="bu guid değeri ile mikro API bilgileri bulunamadı!"
+        )
+    
+
+    hashed_pw = hashlib.md5(
+    f"{payload.api_pw}{payload.api_calismayili}".encode()
+    ).hexdigest()
+
+
+    mikro.api_ip = payload.api_ip    
+    mikro.api_port = payload.api_port
+    mikro.api_protocol = payload.api_protocol
+    mikro.api_firmakodu = payload.api_firmakodu
+    mikro.api_calismayili = payload.api_calismayili
+    mikro.api_kullanici = payload.api_kullanici
+    mikro.api_pw = hashed_pw
+    mikro.api_key = payload.api_key
+    mikro.api_firmano = payload.api_firmano
+    
+    # Audit alanları
+    mikro.api_lastup_user = current_user # JWT varsa buradan al
+    mikro.api_lastup_date = datetime.now()
+
+    tenant_db.commit()
+    tenant_db.refresh(mikro) 
+
+    return {
+        "message": "Mikro API Bilgileri başarıyla güncellendi",
+    }
