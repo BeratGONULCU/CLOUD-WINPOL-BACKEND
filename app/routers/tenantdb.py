@@ -1294,10 +1294,19 @@ def push_mikro_infos(
             detail="bu guid değeri ile mikro API bilgileri bulunamadı!"
         )
     
+    """    
+    BU HASH MANTIĞI POSTMAN İÇERİSİNDEKİ GİBİ OLACAK. O GÜN VE ŞİFREYİ ALIP MD5 E ÇEVİRİP KAYDEDECEK.
+    (YYYY-MM-DD ŞİFRE) = MD5PASSWORD
 
     hashed_pw = hashlib.md5(
     f"{payload.api_pw}{payload.api_calismayili}".encode()
     ).hexdigest()
+    """
+
+    # ===== MD5 ŞİFRELEME =====
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    hash_input = f"{current_date} {payload.api_pw}"
+    hashed_pw = hashlib.md5(hash_input.encode("utf-8")).hexdigest()
 
 
     mikro.api_ip = payload.api_ip    
@@ -1306,7 +1315,7 @@ def push_mikro_infos(
     mikro.api_firmakodu = payload.api_firmakodu
     mikro.api_calismayili = payload.api_calismayili
     mikro.api_kullanici = payload.api_kullanici
-    mikro.api_pw = hashed_pw
+    mikro.api_pw = hashed_pw 
     mikro.api_key = payload.api_key
     mikro.api_firmano = payload.api_firmano
     
@@ -1320,3 +1329,25 @@ def push_mikro_infos(
     return {
         "message": "Mikro API Bilgileri başarıyla güncellendi",
     }
+
+# =====================================================
+# GET mikro_api_settings
+# =====================================================
+
+@router.get("/get-mikro-info")
+def get_mikro_info(
+    tenant_db: Session = Depends(get_tenant_db),
+    session: SessionContext = Depends(require_tenant),
+):
+    mikro_info = tenant_db.execute(
+        select(MikroApiSettings)
+    ).scalar_one_or_none()
+
+    if not mikro_info:
+        raise HTTPException(
+            status_code=404,
+            detail="Mikro API bilgileri bulunamadı."
+        )
+
+    return mikro_info   
+

@@ -107,9 +107,9 @@ class Branch(TenantBase):
     __tablename__ = "branches"
 
     sube_Guid = Column(
-    UUID(as_uuid=True),
-    primary_key=True,
-    default=uuid.uuid4
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4
     )
 
     sube_kilitli = Column(Boolean, default=False)
@@ -124,10 +124,11 @@ class Branch(TenantBase):
         nullable=False
     )
 
-    sube_no = Column(Integer)
+    sube_no = Column(Integer, nullable=False)
     sube_adi = Column(String(100))
     sube_kodu = Column(String(20))
-    sube_MersisNo = Column(String(16),unique=True)
+    sube_MersisNo = Column(String(16), unique=True)
+
     sube_Cadde = Column(String(50))
     sube_Mahalle = Column(String(50))
     sube_Sokak = Column(String(50))
@@ -141,6 +142,14 @@ class Branch(TenantBase):
     sube_TelNo1 = Column(String(10))
 
     firm = relationship("Firm", back_populates="branches")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "sube_bag_firma",
+            "sube_no",
+            name="uq_branch_firma_sube_no"
+        ),
+    )
 
 
 # =====================================================
@@ -280,14 +289,9 @@ class AuditLog(TenantBase):
 
 # eski mikro_api tablosu (şuanda masterdb içerisinde tutuluyor , firms içerisindeki firma_sirano ile bağlı)
 
-
-
 class MikroApiSettings(TenantBase):
     __tablename__ = "mikro_api_settings"
 
-    # =======================
-    # PRIMARY KEY
-    # =======================
     api_Guid = Column(
         UUID(as_uuid=True),
         primary_key=True,
@@ -310,61 +314,37 @@ class MikroApiSettings(TenantBase):
     )
 
     # =======================
+    # BRANCH INFO (NEW)
+    # =======================
+    sube_no = Column(
+        Integer,
+        nullable=False,
+        comment="Mikro API ayarlarının bağlı olduğu şube numarası"
+    )
+
+    # =======================
     # AUDIT / STATE
     # =======================
-    api_kilitli = Column(
-        Boolean,
-        nullable=False,
-        server_default="false"
-    )
+    api_kilitli = Column(Boolean, nullable=False, server_default="false")
 
-    api_create_user = Column(UUID(as_uuid=True), nullable=True)
-    api_lastup_user = Column(UUID(as_uuid=True), nullable=True)
+    api_create_user = Column(UUID(as_uuid=True))
+    api_lastup_user = Column(UUID(as_uuid=True))
 
-    api_create_date = Column(
-        DateTime,
-        server_default=func.now()
-    )
-
-    api_lastup_date = Column(
-        DateTime,
-        onupdate=func.now()
-    )
+    api_create_date = Column(DateTime, server_default=func.now())
+    api_lastup_date = Column(DateTime, onupdate=func.now())
 
     # =======================
     # CONNECTION INFO
     # =======================
-    api_ip = Column(
-        String(64),
-        nullable=False,
-        comment="Mikro ERP API IP / Host"
-    )
-
-    api_port = Column(
-        Integer,
-        nullable=False,
-        comment="Mikro ERP API Port"
-    )
-
-    api_protocol = Column(
-        String(10),
-        nullable=False,
-        server_default="http",
-        comment="http | https"
-    )
+    api_ip = Column(String(64), nullable=False)
+    api_port = Column(Integer, nullable=False)
+    api_protocol = Column(String(10), server_default="http", nullable=False)
 
     # =======================
     # MIKRO INFO
     # =======================
-    api_firmakodu = Column(
-        String(50),
-        nullable=False
-    )
-
-    api_calismayili = Column(
-        String(4),
-        nullable=False
-    )
+    api_firmakodu = Column(String(50), nullable=False)
+    api_calismayili = Column(String(4), nullable=False)
 
     api_kullanici = Column(String(100))
     api_pw = Column(String(255))
@@ -375,12 +355,23 @@ class MikroApiSettings(TenantBase):
     api_veritabani = Column(String(100))
 
     # =======================
-    # RELATIONSHIP
+    # RELATIONSHIPS
     # =======================
     firm = relationship(
         "Firm",
         back_populates="mikro_api_settings",
         foreign_keys=[firma_Guid]
+    )
+
+    branch = relationship(
+        "Branch",
+        primaryjoin="""
+        and_(
+            MikroApiSettings.firma_siraNo == Branch.sube_bag_firma,
+            MikroApiSettings.sube_no == Branch.sube_no
+        )
+        """,
+        viewonly=True
     )
 
 
