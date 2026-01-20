@@ -701,20 +701,20 @@ def Get_All_Firms(
 
 @router.post("/user-register-to-firmby-vergino")
 def user_register_to_firm(
+    vergi_no: str,
     username: str,
     password: str,
     role_id: Optional[str] = None,
     longName: Optional[str] = None,
     cepTel: Optional[str] = None,
     email: Optional[str] = None,
-    tenant_db: Session = Depends(get_tenant_db),
 ):
-    #tenant_db: Session = connect_tenant_by_vergiNo(vergi_no)
+    tenant_db: Session = connect_tenant_by_vergiNo(vergi_no)
 
     try:
         # Firmayı bul
         firm = tenant_db.execute(
-            select(Firm).where(Firm)
+            select(Firm).where(Firm.firma_FVergiNo == vergi_no)
         ).scalar_one_or_none()
 
         if not firm:
