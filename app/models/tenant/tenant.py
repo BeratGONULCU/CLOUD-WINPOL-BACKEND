@@ -1,13 +1,14 @@
 import uuid
 from sqlalchemy import (
     CheckConstraint, Column, Identity, String, Boolean, Integer,
-    ForeignKey, DateTime, UniqueConstraint, text
+    ForeignKey, DateTime, UniqueConstraint, text, ForeignKeyConstraint
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.base_tenant import TenantBase
-
+from sqlalchemy.orm import foreign
+from sqlalchemy import and_
 
 # =====================================================
 # FIRM
@@ -207,42 +208,56 @@ class User(TenantBase):
     __tablename__ = "users"
 
     kullanici_Guid = Column(
-    UUID(as_uuid=True),
-    primary_key=True,
-    default=uuid.uuid4
-    )   
-
-
-    firma_siraNo = Column(
-    Integer,
-    ForeignKey("firms.firma_sirano"),
-    nullable=False
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4
     )
 
+    # ================= FIRM =================
+    firma_siraNo = Column(
+        Integer,
+        ForeignKey("firms.firma_sirano"),
+        nullable=False
+    )
+
+    # ================= AUDIT =================
     kullanici_create_user = Column(UUID(as_uuid=True), nullable=True)
     kullanici_create_date = Column(DateTime, server_default=func.now())
     kullanici_lastup_user = Column(Integer)
     kullanici_lastup_date = Column(DateTime)
 
-    # bu kısımdadki kullanıcı bilgileri güncellendi
-    kullanici_no = Column(Integer,autoincrement=True, unique=True)
-    kullanici_name = Column(String(20),unique=True, nullable=False)
+    # ================= USER CORE =================
+    kullanici_no = Column(Integer, autoincrement=True, unique=True)
+    kullanici_name = Column(String(20), unique=True, nullable=False)
     kullanici_pw = Column(String(127), nullable=False)
     kullanici_LongName = Column(String(50))
-    kullanici_EMail = Column(String(50), unique=True,  nullable=False)
+    kullanici_EMail = Column(String(50), unique=True, nullable=False)
     kullanici_SifreTipi = Column(Integer)
     kullanici_SifreDegisim_date = Column(DateTime)
     kullanici_pasif = Column(Boolean, default=False)
-    kullanici_Ceptel = Column(String(11)) 
+    kullanici_Ceptel = Column(String(11))
 
+    # ================= ROLE =================
     role_id = Column(UUID(as_uuid=True), ForeignKey("roles.id"))
 
+    # ================= MIKRO SYNC =================
+    mikro_personel_guid = Column(
+        UUID(as_uuid=True),
+        unique=True,
+        nullable=True,
+        index=True
+    )
+
+    mikro_personel_kod = Column(String(20))   # per_kod
+    mikro_last_sync = Column(DateTime)      # son sync zamanı
+
+    # ================= RELATIONS =================
     firm = relationship("Firm", back_populates="users")
     role = relationship("Role")
     favorites = relationship(
-    "UserFavorite",
-    back_populates="user",
-    cascade="all, delete-orphan"
+        "UserFavorite",
+        back_populates="user",
+        cascade="all, delete-orphan"
     )
 
 
@@ -292,6 +307,9 @@ class AuditLog(TenantBase):
 class MikroApiSettings(TenantBase):
     __tablename__ = "mikro_api_settings"
 
+    # =======================
+    # PRIMARY KEY
+    # =======================
     api_Guid = Column(
         UUID(as_uuid=True),
         primary_key=True,
@@ -299,7 +317,7 @@ class MikroApiSettings(TenantBase):
     )
 
     # =======================
-    # FIRM RELATION
+    # FIRM INFO
     # =======================
     firma_Guid = Column(
         UUID(as_uuid=True),
@@ -314,7 +332,7 @@ class MikroApiSettings(TenantBase):
     )
 
     # =======================
-    # BRANCH INFO (NEW)
+    # BRANCH INFO
     # =======================
     sube_no = Column(
         Integer,
@@ -322,8 +340,18 @@ class MikroApiSettings(TenantBase):
         comment="Mikro API ayarlarının bağlı olduğu şube numarası"
     )
 
+    # DB'DEKİ COMPOSITE FK
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["firma_siraNo", "sube_no"],
+            ["branches.sube_bag_firma", "branches.sube_no"],
+            ondelete="CASCADE",
+            name="fk_mikro_api_branch"
+        ),
+    )
+
     # =======================
-    # AUDIT / STATE
+    # STATE / AUDIT
     # =======================
     api_kilitli = Column(Boolean, nullable=False, server_default="false")
 
@@ -331,14 +359,14 @@ class MikroApiSettings(TenantBase):
     api_lastup_user = Column(UUID(as_uuid=True))
 
     api_create_date = Column(DateTime, server_default=func.now())
-    api_lastup_date = Column(DateTime, onupdate=func.now())
+    api_lastup_date = Column(DateTime)
 
     # =======================
     # CONNECTION INFO
     # =======================
     api_ip = Column(String(64), nullable=False)
     api_port = Column(Integer, nullable=False)
-    api_protocol = Column(String(10), server_default="http", nullable=False)
+    api_protocol = Column(String(10), nullable=False, server_default="http")
 
     # =======================
     # MIKRO INFO
@@ -348,10 +376,10 @@ class MikroApiSettings(TenantBase):
 
     api_kullanici = Column(String(100))
     api_pw = Column(String(255))
+    api_pw_non_hash = Column(String(255))
     api_key = Column(String(255))
 
     api_firmano = Column(String(20))
-    api_subeno = Column(String(20))
     api_veritabani = Column(String(100))
 
     # =======================
@@ -365,14 +393,9 @@ class MikroApiSettings(TenantBase):
 
     branch = relationship(
         "Branch",
-        primaryjoin="""
-        and_(
-            MikroApiSettings.firma_siraNo == Branch.sube_bag_firma,
-            MikroApiSettings.sube_no == Branch.sube_no
-        )
-        """,
         viewonly=True
     )
+
 
 
 # =====================================================

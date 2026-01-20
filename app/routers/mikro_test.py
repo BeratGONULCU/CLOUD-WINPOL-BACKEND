@@ -21,8 +21,6 @@ def get_db():
         db.close()
 
 
-
-
 @router.post("/mikro/{endpoint}")
 def test_mikro_call(
     endpoint: str,

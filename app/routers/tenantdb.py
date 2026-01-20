@@ -1,7 +1,7 @@
-from datetime import timedelta
+from datetime import date, timedelta
 import hashlib
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import UUID, select, text
 from typing import Optional, Generator
@@ -34,9 +34,22 @@ bearer_scheme = HTTPBearer()
 
 router = APIRouter(prefix="/tenant", tags=["Tenant DB"])
 
+# =====================================================
+# api_pw_non_hash kolonunu generate_mikro_md5 
+# =====================================================
+
+def generate_mikro_md5(password: str) -> str:
+    """
+    Node.js karşılığı:
+    CryptoJS.MD5(`${YYYY-MM-DD} ${password}`)
+    """
+    current_date = date.today().strftime("%Y-%m-%d")
+    raw = f"{current_date} {password}"
+    return hashlib.md5(raw.encode("utf-8")).hexdigest()
+
 
 # =====================================================
-# MASTER DB SESSION (sadece gerekirse)
+# MASTER DB SESSION 
 # =====================================================
 
 def get_db() -> Generator[Session, None, None]:
@@ -170,20 +183,22 @@ def resolve_company_id_from_db_name(master_db: Session, tenant_db_name: str) -> 
     return str(company_id)
 
 
-
 # =====================================================
 # TENANT INFO (TEST)
 # =====================================================
-
 @router.get("/tenant-info")
-def tenant_info(token: str = Depends(get_current_token)):
-    payload = decode_access_token(token)
-
-    tenant_id = payload.get("tenant_id")
-    domain = payload.get("domain")
+def tenant_info(
+    session: SessionContext = Depends(require_tenant),
+):
+    # require_tenant zaten JWT'yi doğruladı
+    tenant_id = session.tenant_id
+    domain = session.domain
 
     if domain != "tenant" or not tenant_id:
-        raise HTTPException(status_code=401, detail="Invalid tenant token")
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid tenant token"
+        )
 
     tenant_db = connect_tenant_by_vergiNo(tenant_id)
 
@@ -194,12 +209,31 @@ def tenant_info(token: str = Depends(get_current_token)):
 
         return {
             "connected_database": db_name,
-            "tenant_id": tenant_id,
         }
     finally:
         tenant_db.close()
 
+# =====================================================
+# TENANT INFO (TEST)
+# =====================================================
+@router.get("/tenant-api-pw-info")
+def tenant_api_pw_info(
+    tenant_db: Session = Depends(get_tenant_db)
+):
+    try:
+        api_pw_non_hash = tenant_db.execute(
+            select(MikroApiSettings.api_pw_non_hash).limit(1)
+        ).scalar_one_or_none()
 
+        if not api_pw_non_hash:
+            return False
+        
+        return True
+
+    finally:
+        tenant_db.close()
+
+    
 
 # =====================================================
 # TENANT FIRM CREATE
@@ -632,14 +666,14 @@ def insert_firm(
 # =====================================================
 
 @router.get("/get-all-firmsby-vergiNo")
-def Get_All_Firms_By_Vergino(
-    vergiNo: str, # 10 haneli olacak ve required olacak
+def Get_All_Firms(
+    #vergiNo: str, # 10 haneli olacak ve required olacak
+    tenant_db: Session = Depends(get_tenant_db)
 ):
-    tenant_db : Session = connect_tenant_by_vergiNo(vergiNo)
 
     try:
         firms = tenant_db.execute(
-            select(Firm).where(Firm.firma_FVergiNo == vergiNo)
+            select(Firm).where(Firm)
         ).scalar_one_or_none()
 
         if not firms: 
@@ -648,7 +682,7 @@ def Get_All_Firms_By_Vergino(
                 detail="bu vergi no ile firma kaydı bulunamadı."
             )
     
-        if not firms.firma_FVergiNo == vergiNo: # böyle bir şeyin olma ihtimali çok düşük
+        if not firms: # böyle bir şeyin olma ihtimali çok düşük
             raise HTTPException(
                 status_code=404,
                 detail="yanlış vergi no değeri girildi"
@@ -666,21 +700,21 @@ def Get_All_Firms_By_Vergino(
 # - role-id seçtirilecek (foreign key nasıl yapılacak)
 
 @router.post("/user-register-to-firmby-vergino")
-def user_register_to_firmby_vergino(
-    vergi_no: str,
+def user_register_to_firm(
     username: str,
     password: str,
     role_id: Optional[str] = None,
     longName: Optional[str] = None,
     cepTel: Optional[str] = None,
     email: Optional[str] = None,
+    tenant_db: Session = Depends(get_tenant_db),
 ):
-    tenant_db: Session = connect_tenant_by_vergiNo(vergi_no)
+    #tenant_db: Session = connect_tenant_by_vergiNo(vergi_no)
 
     try:
         # Firmayı bul
         firm = tenant_db.execute(
-            select(Firm).where(Firm.firma_FVergiNo == vergi_no)
+            select(Firm).where(Firm)
         ).scalar_one_or_none()
 
         if not firm:
@@ -714,6 +748,132 @@ def user_register_to_firmby_vergino(
             kullanici_no=user_no,
             kullanici_create_user=None,  # REGISTER → SYSTEM
         )
+
+        tenant_db.add(new_user)
+        tenant_db.commit()
+        tenant_db.refresh(new_user)
+
+        return {
+            "user_id": str(new_user.kullanici_Guid),
+            "username": new_user.kullanici_name,
+            "firma_siraNo": firm.firma_sirano,
+        }
+
+    except HTTPException:
+        tenant_db.rollback()
+        raise
+    except Exception as e:
+        tenant_db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Kullanıcı oluşturulurken hata oluştu: {str(e)}"
+        )
+    finally:
+        tenant_db.close()
+
+# =====================================================
+# TENANT-MIKRO USER REGISTER 
+# =====================================================
+# bu register uygulama içindeki - hem mikro hem tenant içine eklemek için kullanılacak
+
+@router.post("/user-register-with-mikro")
+def user_register_with_mikro(
+    username: str,
+    password: str,
+    mikroPersonelGuid: Optional[str] = None,
+    mikroPersonelKod: Optional[str] = None,
+    role_id: Optional[str] = None,
+    longName: Optional[str] = None,
+    cepTel: Optional[str] = None,
+    email: Optional[str] = None,
+    tenant_db: Session = Depends(get_tenant_db),
+):
+
+    if not mikroPersonelGuid and not mikroPersonelKod:
+        raise HTTPException(
+            status_code=400,
+            detail="mikroPersonelGuid veya mikroPersonelKod alanlarından en az biri zorunludur"
+        )
+
+    parsed_mikro_guid = None
+    if mikroPersonelGuid:
+        try:
+            parsed_mikro_guid = uuid.UUID(mikroPersonelGuid)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="mikroPersonelGuid geçerli bir UUID değil"
+            )
+
+    if parsed_mikro_guid:
+        existing = tenant_db.execute(
+            select(User).where(User.mikro_personel_guid == parsed_mikro_guid)
+        ).scalar_one_or_none()
+
+        if existing:
+            return {
+                "user_id": str(existing.kullanici_Guid),
+                "username": existing.kullanici_name,
+                "firma_siraNo": existing.firma_siraNo,
+                "message": "Bu Mikro personel zaten kullanıcıya bağlı"
+            }
+
+    if mikroPersonelKod:
+        existing = tenant_db.execute(
+            select(User).where(User.mikro_personel_kod == mikroPersonelKod)
+        ).scalar_one_or_none()
+
+        if existing:
+            return {
+                "user_id": str(existing.kullanici_Guid),
+                "username": existing.kullanici_name,
+                "firma_siraNo": existing.firma_siraNo,
+                "message": "Bu per_kod zaten kullanıcıya bağlı"
+            }   
+
+
+    try:
+        # Firmayı bul
+        firm = tenant_db.execute(
+            select(Firm).where(Firm.firma_kilitli != True)
+        ).scalars().first()
+
+
+        if not firm:
+            raise HTTPException(
+                status_code=404,
+                detail="Bu firma bulunamadı."
+            )
+
+        # Yeni kullanıcı numarası
+        user_no = tenant_db.execute(
+            text("SELECT COALESCE(MAX(kullanici_no), 0) + 1 FROM users")
+        ).scalar()
+
+        if not user_no:
+            raise HTTPException(
+                status_code=500,
+                detail="Kullanıcı numarası üretilemedi."
+            )
+
+        # Kullanıcı oluştur
+        new_user = User(
+        kullanici_Guid=uuid.uuid4(),
+        firma_siraNo=firm.firma_sirano,
+        kullanici_name=username.strip(),
+        kullanici_pw=hash_password(password),
+        kullanici_pasif=False,
+        role_id=role_id,
+        kullanici_LongName=longName,
+        kullanici_EMail=email,
+        kullanici_Ceptel=cepTel,
+        kullanici_no=user_no,
+        kullanici_create_user=None,
+        mikro_personel_guid=parsed_mikro_guid,
+        mikro_personel_kod=mikroPersonelKod,
+        mikro_last_sync=datetime.now(),
+    )
+
 
         tenant_db.add(new_user)
         tenant_db.commit()
@@ -867,27 +1027,15 @@ def user_update_to_firmby_vergino(
 # ROLE INSERT FİRMA VERGİ NO İLE
 # =====================================================
 
+from sqlalchemy.exc import IntegrityError
+
 @router.post("/role-insert-vergino")
 def role_insert_vergino(
-    vergi_no: str,
     name: str,
     description: str,
+    tenant_db: Session = Depends(get_tenant_db),
 ):
-    tenant_db: Session = connect_tenant_by_vergiNo(vergi_no)
-
     try:
-        # Firmayı bul
-        firm = tenant_db.execute(
-            select(Firm).where(Firm.firma_FVergiNo == vergi_no)
-        ).scalar_one_or_none()
-
-        if not firm:
-            raise HTTPException(
-                status_code=404,
-                detail="Bu vergi numarasına ait firma bulunamadı."
-            )
-
-        # Rol oluştur
         new_role = Role(
             id=uuid.uuid4(),
             name=name,
@@ -904,14 +1052,26 @@ def role_insert_vergino(
             "description": new_role.description
         }
 
-    except HTTPException:
+    except IntegrityError as e:
         tenant_db.rollback()
-        raise
+
+        # UNIQUE violation kontrolü
+        if "roles_name_key" in str(e):
+            raise HTTPException(
+                status_code=409,
+                detail="Bu isimde bir rol zaten mevcut."
+            )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Veritabanı hatası oluştu."
+        )
+
     except Exception as e:
         tenant_db.rollback()
         raise HTTPException(
             status_code=500,
-            detail=f"role eklenirken hata oluştu: {str(e)}"
+            detail=f"Role eklenirken hata oluştu: {str(e)}"
         )
     finally:
         tenant_db.close()
@@ -922,13 +1082,11 @@ def role_insert_vergino(
 
 @router.get("/get-all-roles")
 def get_all_roles(
-    vergi_no: str,
-    session: SessionContext = Depends(require_tenant),
+    tenantdb: Session = Depends(get_tenant_db),
 ):
-    tenant_db: Session = connect_tenant_by_vergiNo(vergi_no)
 
     try:
-        roles = tenant_db.execute(
+        roles = tenantdb.execute(
             select(Role)
         ).scalars().all()
 
@@ -949,7 +1107,7 @@ def get_all_roles(
             detail=f"Roller alınırken hata oluştu: {str(e)}"
         ) 
     finally:
-        tenant_db.close()
+        tenantdb.close()
 
 
 
@@ -1013,6 +1171,7 @@ def user_login_to_firmby_vergino2(
     tenant_db: Session = connect_tenant_by_vergiNo(vergi_no)
 
     try:
+        # ================= USER AUTH =================
         user = tenant_db.execute(
             select(User).where(
                 User.kullanici_EMail == email,
@@ -1026,18 +1185,36 @@ def user_login_to_firmby_vergino2(
         if not verify_password(password, user.kullanici_pw):
             raise HTTPException(status_code=401, detail="Invalid credentials")
 
-        #token = create_access_token({"sub": str(user.kullanici_Guid)})
+        # ================= TOKEN =================
         token = create_access_token(
-        {
-        "sub": str(user.kullanici_Guid),
-        "domain": "tenant",
-        "tenant_id": vergi_no,
-        "role_id": str(user.role_id) if user.role_id else None
-        },
-        expires_delta=timedelta(days=3)
+            {
+                "sub": str(user.kullanici_Guid),
+                "domain": "tenant",
+                "tenant_id": vergi_no,
+                "role_id": str(user.role_id) if user.role_id else None
+            },
+            expires_delta=timedelta(days=3)
         )
 
+        # ================= MIKRO API PASSWORD HASH =================
+        try:
+            mikro = tenant_db.execute(
+                select(MikroApiSettings).limit(1)
+            ).scalar_one_or_none()
 
+            if mikro and mikro.api_pw_non_hash:
+                api_pw = generate_mikro_md5(mikro.api_pw_non_hash)
+
+                mikro.api_pw = api_pw
+
+                tenant_db.commit()
+
+        except Exception as e:
+            # Login’i ASLA bozma
+            tenant_db.rollback()
+            print("Mikro API hash update failed:", str(e))
+
+        # ================= RESPONSE =================
         return {
             "access_token": token,
             "token_type": "bearer",
@@ -1047,7 +1224,6 @@ def user_login_to_firmby_vergino2(
 
     finally:
         tenant_db.close()
-
 
 ## =====================================================
 # get all admin personel 
@@ -1269,9 +1445,14 @@ def get_favorite_by_id(
 @router.put("/push-mikro-info")
 def push_mikro_infos(
     payload: MikroApiUpdateSchema,
+    request: Request,
     tenant_db: Session = Depends(get_tenant_db),
-    current_user: UUID = Depends(get_current_user)
 ):
+    print("==== DEBUG AUTH ====")
+    print("Authorization header:", request.headers.get("authorization"))
+    print("All headers:", dict(request.headers))
+    print("====================")
+
     
     firm = tenant_db.execute(
         select(Firm).where(Firm.firma_kilitli != True)
@@ -1305,9 +1486,8 @@ def push_mikro_infos(
 
     # ===== MD5 ŞİFRELEME =====
     current_date = datetime.now().strftime("%Y-%m-%d")
-    hash_input = f"{current_date} {payload.api_pw}"
+    hash_input = f"{current_date} {payload.api_pw_non_hash}"
     hashed_pw = hashlib.md5(hash_input.encode("utf-8")).hexdigest()
-
 
     mikro.api_ip = payload.api_ip    
     mikro.api_port = payload.api_port
@@ -1316,11 +1496,13 @@ def push_mikro_infos(
     mikro.api_calismayili = payload.api_calismayili
     mikro.api_kullanici = payload.api_kullanici
     mikro.api_pw = hashed_pw 
+    mikro.api_pw_non_hash = payload.api_pw_non_hash
     mikro.api_key = payload.api_key
     mikro.api_firmano = payload.api_firmano
+    mikro.sube_no = payload.sube_no
     
     # Audit alanları
-    mikro.api_lastup_user = current_user # JWT varsa buradan al
+    #mikro.api_lastup_user = current_user # JWT varsa buradan al
     mikro.api_lastup_date = datetime.now()
 
     tenant_db.commit()

@@ -9,6 +9,9 @@ class MikroApiUpdateSchema(BaseModel):
     api_firmakodu: Annotated[str, Field(max_length=50)]
     api_calismayili: Annotated[str, Field(max_length=4)]
     api_kullanici: Optional[Annotated[str, Field(max_length=100)]]
-    api_pw: Optional[str]
+    # api_pw: Optional[str] --> bunu api_pw_non_hash ile vericez
+    api_pw_non_hash: str
     api_key: Optional[Annotated[str, Field(max_length=255)]]
     api_firmano: Optional[Annotated[str, Field(max_length=20)]]
+    sube_no: Optional[int]
+    
