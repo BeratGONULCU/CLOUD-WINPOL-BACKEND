@@ -340,15 +340,6 @@ class MikroApiSettings(TenantBase):
         comment="Mikro API ayarlarının bağlı olduğu şube numarası"
     )
 
-    # DB'DEKİ COMPOSITE FK
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["firma_siraNo", "sube_no"],
-            ["branches.sube_bag_firma", "branches.sube_no"],
-            ondelete="CASCADE",
-            name="fk_mikro_api_branch"
-        ),
-    )
 
     # =======================
     # STATE / AUDIT

@@ -6,8 +6,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import UUID, select, text
 from typing import Optional, Generator
 from passlib.context import CryptContext
+from sqlalchemy.exc import IntegrityError
 
 from sqlalchemy.exc import SQLAlchemyError
+from app.core import session
 from app.core.auth_context import get_current_token
 from app.core.session import SessionContext
 from app.db.master import get_master_db
@@ -238,8 +240,6 @@ def tenant_api_pw_info(
 # =====================================================
 # TENANT FIRM CREATE
 # =====================================================
-
-
 @router.post("/tenant-firm-create")
 def tenant_firm_create(
     firma_unvan: str,
@@ -292,13 +292,15 @@ def tenant_firm_create(
                 "firma_Guid",
                 firma_unvan,
                 "firma_TCkimlik",
-                "firma_FVergiNo"
+                "firma_FVergiNo",
+                "firma_kilitli"
             )
             VALUES (
                 :firma_Guid,
                 :firma_unvan,
                 :firma_TCkimlik,
-                :firma_FVergiNo
+                :firma_FVergiNo,
+                false
             )
             RETURNING "firma_Guid", firma_sirano;
         """),
@@ -1027,8 +1029,6 @@ def user_update_to_firmby_vergino(
 # ROLE INSERT FİRMA VERGİ NO İLE
 # =====================================================
 
-from sqlalchemy.exc import IntegrityError
-
 @router.post("/role-insert-vergino")
 def role_insert_vergino(
     name: str,
@@ -1437,12 +1437,77 @@ def get_favorite_by_id(
             detail="veritabanı hatası"
         )
     
-
 # =====================================================
 # INSERT mikro_api_settings
 # =====================================================
 
-@router.put("/push-mikro-info")
+@router.post("/post-mikro-info")
+def post_mikro_infos(
+    payload: MikroApiUpdateSchema,
+    request: Request,
+    tenant_db: Session = Depends(get_tenant_db),
+):
+    
+    if payload.sube_no is None:
+        raise HTTPException(400, "Şube No zorunludur")
+
+    firm = tenant_db.execute(
+        select(Firm).where(Firm.firma_kilitli != True)
+    ).scalar_one_or_none()
+
+    if not firm:
+        raise HTTPException(
+            status_code=404,
+            detail="firma bilgisi yok."
+        )
+
+    existing_mikro = tenant_db.execute(
+        select(MikroApiSettings)
+        .where(MikroApiSettings.firma_Guid == firm.firma_Guid)
+    ).scalar_one_or_none()
+
+    if existing_mikro:
+        raise HTTPException(
+            status_code=409,
+            detail="Bu firma için Mikro API bilgileri zaten mevcut."
+        )
+
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    hash_input = f"{current_date} {payload.api_pw_non_hash}"
+    hashed_pw = hashlib.md5(hash_input.encode("utf-8")).hexdigest()
+
+    new_mikro = MikroApiSettings(
+        firma_Guid=firm.firma_Guid,
+        firma_siraNo=firm.firma_sirano, 
+        sube_no=payload.sube_no,
+        api_ip=payload.api_ip,
+        api_port=payload.api_port,
+        api_protocol=payload.api_protocol,
+        api_firmakodu=payload.api_firmakodu,
+        api_calismayili=payload.api_calismayili,
+        api_kullanici=payload.api_kullanici,
+        api_pw=hashed_pw,
+        api_pw_non_hash=payload.api_pw_non_hash,
+        api_key=payload.api_key,
+        #api_firmano=payload.api_firmano, # --> bu değeri default olarak alması gerekiyor
+        api_firmano=firm.firma_sirano,
+        api_create_date=datetime.now(),
+    )
+
+    tenant_db.add(new_mikro)
+    tenant_db.commit()
+    tenant_db.refresh(new_mikro)
+
+    return {
+        "message": "Mikro API Bilgileri başarıyla kaydedildi",
+    }
+
+
+# =====================================================
+# UPDATE mikro_api_settings
+# =====================================================
+
+@router.put("/put-mikro-info")
 def push_mikro_infos(
     payload: MikroApiUpdateSchema,
     request: Request,
@@ -1498,7 +1563,7 @@ def push_mikro_infos(
     mikro.api_pw = hashed_pw 
     mikro.api_pw_non_hash = payload.api_pw_non_hash
     mikro.api_key = payload.api_key
-    mikro.api_firmano = payload.api_firmano
+    mikro.api_firmano = firm.firma_sirano
     mikro.sube_no = payload.sube_no
     
     # Audit alanları
